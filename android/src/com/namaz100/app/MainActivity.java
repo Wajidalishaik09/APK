@@ -17,6 +17,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -33,7 +34,7 @@ import java.io.OutputStream;
 public class MainActivity extends Activity {
     static final String HOST = "appassets.namaz100.local";
     static final String START = "https://" + HOST + "/namaz-tracker.html";
-    static final int REQ_SAVE = 1, REQ_OPEN = 2, REQ_LOCATION = 3, REQ_NOTIFY = 4, REQ_PHOTO = 5;
+    static final int REQ_SAVE = 1, REQ_OPEN = 2, REQ_LOCATION = 3, REQ_NOTIFY = 4, REQ_PHOTO = 5, REQ_CAMERA = 6;
 
     private WebView web;
     private Store store;
@@ -41,6 +42,7 @@ public class MainActivity extends Activity {
     private byte[] pendingBytes;
     private ValueCallback<Uri[]> fileCallback;
     private GeolocationPermissions.Callback geoCallback;
+    private PermissionRequest camRequest;
     private String geoOrigin;
 
     @Override
@@ -57,6 +59,8 @@ public class MainActivity extends Activity {
         s.setDatabaseEnabled(true);
         s.setGeolocationEnabled(true);
         s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setMediaPlaybackRequiresUserGesture(true);
         s.setTextZoom(100);
 
@@ -87,10 +91,29 @@ public class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback cb) {
+                Uri o = Uri.parse(origin);
+                if (!HOST.equals(o.getHost())) { cb.invoke(origin, false, false); return; } // only our own page
                 if (hasLocation()) { cb.invoke(origin, true, false); return; }
                 geoOrigin = origin; geoCallback = cb;
                 requestPermissions(new String[]{"android.permission.ACCESS_COARSE_LOCATION"}, REQ_LOCATION);
             }
+
+            // Live in-app camera for the Masjid photo (getUserMedia). Only our own page may use it.
+            @Override
+            public void onPermissionRequest(final PermissionRequest req) {
+                runOnUiThread(new Runnable() { public void run() {
+                    boolean video = false;
+                    for (String r : req.getResources()) if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) video = true;
+                    if (!video || !HOST.equals(req.getOrigin().getHost())) { req.deny(); return; }
+                    if (hasCamera()) { req.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE}); return; }
+                    if (camRequest != null) camRequest.deny();
+                    camRequest = req;
+                    requestPermissions(new String[]{"android.permission.CAMERA"}, REQ_CAMERA);
+                }});
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest req) { if (req == camRequest) camRequest = null; }
 
             @Override
             public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams params) {
@@ -163,7 +186,14 @@ public class MainActivity extends Activity {
             geoCallback.invoke(geoOrigin, hasLocation(), false);
             geoCallback = null;
         }
+        if (code == REQ_CAMERA && camRequest != null) {
+            if (hasCamera()) camRequest.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+            else camRequest.deny();
+            camRequest = null;
+        }
     }
+
+    boolean hasCamera() { return checkSelfPermission("android.permission.CAMERA") == PackageManager.PERMISSION_GRANTED; }
 
     @Override
     protected void onActivityResult(int code, int result, Intent data) {
@@ -253,6 +283,8 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void takePhoto() {
             runOnUiThread(new Runnable() { public void run() {
+                if (!hasCamera()) { requestPermissions(new String[]{"android.permission.CAMERA"}, REQ_CAMERA);
+                    web.evaluateJavascript("window.onNativePhoto && window.onNativePhoto('')", null); return; }
                 try { startActivityForResult(new Intent(MediaStore.ACTION_IMAGE_CAPTURE), REQ_PHOTO); }
                 catch (Exception e) { web.evaluateJavascript("window.onNativePhoto && window.onNativePhoto('nocamera')", null); }
             }});

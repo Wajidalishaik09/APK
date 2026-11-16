@@ -21,7 +21,7 @@ public class PlayStore implements Store {
     private final MainActivity act;
     private final BillingClient client;
     private ProductDetails details;
-    private boolean owned, pending;
+    private boolean owned, pending, checked;
     private String price = "", error = "";
 
     public PlayStore(MainActivity activity) {
@@ -31,7 +31,7 @@ public class PlayStore implements Store {
                 if (result.getResponseCode() == BillingClient.BillingResponseCode.OK && purchases != null) {
                     handle(purchases);
                 } else if (result.getResponseCode() == BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED) {
-                    owned = true; report();
+                    owned = true; checked = true; report();
                 } else if (result.getResponseCode() != BillingClient.BillingResponseCode.USER_CANCELED) {
                     error = "Purchase did not complete (" + result.getResponseCode() + "). Please try again.";
                     report();
@@ -99,12 +99,12 @@ public class PlayStore implements Store {
                 wait = true;
             }
         }
-        owned = found; pending = wait && !found;
+        owned = found; pending = wait && !found; checked = true;
         report();
     }
 
     private void report() {
-        act.sendStoreState("{\"play\":true,\"owned\":" + owned + ",\"pending\":" + pending
+        act.sendStoreState("{\"play\":true,\"checked\":" + checked + ",\"owned\":" + owned + ",\"pending\":" + pending
             + ",\"ready\":" + (details != null) + ",\"price\":" + MainActivity.jsonStr(price)
             + ",\"error\":" + MainActivity.jsonStr(error) + "}");
     }

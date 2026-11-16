@@ -2346,7 +2346,16 @@ try{ if(window.AndroidBridge && AndroidBridge.isPlayBuild && AndroidBridge.isPla
 // "Buyer Preview" builds behave like the Play Store version, with a simulated purchase
 const BUYER_PREVIEW = !!window.__BUYER_PREVIEW;
 if(BUYER_PREVIEW){ STORE.play=true; STORE.owned=!!S.owned; STORE.price='₹199'; }
-function isLocked(){ return STORE.play && !STORE.owned; }
+// Google Play reviewers cannot pay, so a private access code (given only in Play Console → App access) unlocks the challenge.
+const REVIEW_HASH='54d12682d595f229aa4ef8c6f3d7358e7277a3045ba25aa560ddd1086ea99f1a';
+function isLocked(){ return STORE.play && !STORE.owned && !S.reviewAccess; }
+async function tryAccessCode(raw){
+  const code=(raw||'').trim().toUpperCase(); if(!code) return;
+  let hex='';
+  try{ const b=await crypto.subtle.digest('SHA-256', new TextEncoder().encode('namaz100:'+code)); hex=[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(''); }catch(e){}
+  if(hex===REVIEW_HASH){ S.reviewAccess=true; if(!S.started){ S.started=true; S.start=todayStr(); } save(); applyLock(); renderAll(); bigCelebrate('Access code accepted — the 100-Day Challenge is unlocked 🌙'); }
+  else toast('That code is not valid');
+}
 function buyChallenge(){
   if(BUYER_PREVIEW){ ask('Preview app: on Google Play this opens the ₹199 payment screen. Simulate a successful purchase now?','Simulate purchase').then(ok=>{ if(ok) window.onStoreState({play:true,owned:true,price:'₹199'}); }); return; }
   if(PREVIEW){ toast('Preview only — on Google Play this opens the ₹199 payment screen'); return; } STORE.error=''; renderPaywall(); try{ AndroidBridge.storeBuy(); }catch(e){} }
@@ -2355,6 +2364,7 @@ function renderPaywall(){
     <p class="note" style="margin:0">${S.why?`Your reason: <i>“${esc(S.why)}”</i>`:'Build the habit of praying every prayer on time.'}</p>
     <ul><li>${SIS()?'🌸 Track all 5 prayers on time':'🕌 Track all 5 prayers in the Masjid'}, every day</li><li>🎯 Your targets, daily score &amp; 🔥 streaks</li><li>✅ Haram guard, adhkar, good deeds &amp; bad-habit checklists</li><li>📊 100-day progress map, stats &amp; milestones</li><li>🤲 25+ authentic duas with Arabic, meaning &amp; source — plus your personal dua list</li></ul>
     <button class="btn primary buy" data-buy ${STORE.pending?'disabled':''}>${STORE.pending?'⏳ Payment pending…':`Unlock for ${price||'a one-time price'}`}</button>
+    <details class="note" style="margin-top:6px"><summary style="cursor:pointer">Have an access code?</summary><div class="row" style="margin-top:6px"><input class="acode" placeholder="Access code" autocomplete="off" autocapitalize="characters" style="flex:1;min-width:0"><button class="btn" data-acode>Apply</button></div></details>
     <div class="note" style="margin-top:6px">One-time purchase — yours forever. Prayer times, reminders, Qibla, guides, quiz and tools stay free.</div>
     <div class="perr">${esc(STORE.error||'')}</div>`;
   $('#paywall').innerHTML=html; $('#paywall2').innerHTML=html; $('#paywall3').innerHTML=html;
@@ -2372,7 +2382,7 @@ window.onStoreState = st => {
     renderAll(); bigCelebrate('Challenge unlocked! Your 100 days start today. Bismillah 🌙');
   } else renderAll();
 };
-document.addEventListener('click',e=>{ if(e.target.closest('[data-buy]')) buyChallenge(); });
+document.addEventListener('click',e=>{ if(e.target.closest('[data-buy]')) buyChallenge(); const ac=e.target.closest('[data-acode]'); if(ac){ const i=ac.parentElement.querySelector('.acode'); tryAccessCode(i&&i.value); } });
 
 $('#sGender').addEventListener('change',()=>setTimeout(()=>{ renderGender(); renderAll(); },30));
 

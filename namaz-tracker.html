@@ -2300,7 +2300,9 @@ function renderPaywall(){
 function applyLock(){ document.body.classList.toggle('locked', isLocked()); renderPaywall(); }
 window.onStoreState = st => {
   const was=isLocked();
-  Object.assign(STORE, {play:st.play!==false, owned:!!st.owned, pending:!!st.pending, price:st.price||STORE.price, error:st.error||''});
+  // checked:false = Google Play could not be reached (offline): keep the last verified state, never lock a buyer out
+  const owned = st.checked===false ? (STORE.owned||!!st.owned) : !!st.owned;
+  Object.assign(STORE, {play:st.play!==false, owned, pending:!!st.pending, price:st.price||STORE.price, error:st.error||''});
   if(S.owned!==STORE.owned){ S.owned=STORE.owned; save(); }
   applyLock(); wPrep3();
   if(was && !isLocked()){

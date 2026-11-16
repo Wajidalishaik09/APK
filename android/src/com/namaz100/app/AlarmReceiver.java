@@ -24,7 +24,14 @@ public class AlarmReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context ctx, Intent intent) {
         if (ACTION.equals(intent.getAction())) {
-            show(ctx, intent.getStringExtra("title"), intent.getStringExtra("body"));
+            // The receiver is exported (needed for boot / time-change broadcasts), so never trust
+            // text sent by another app: show only the reminder this app scheduled itself.
+            SharedPreferences p = prefs(ctx);
+            long due = p.getLong("due", 0), now = System.currentTimeMillis();
+            if (due > 0 && now >= due - 60000 && now <= due + 3600000) {
+                show(ctx, p.getString("dueTitle", "Prayer time"), p.getString("dueBody", ""));
+                p.edit().remove("due").apply();
+            }
         }
         scheduleNext(ctx);
     }
@@ -50,8 +57,9 @@ public class AlarmReceiver extends BroadcastReceiver {
                 if (old != null) am.cancel(old);
                 return;
             }
-            i.putExtra("title", next.optString("title", "Prayer time"));
-            i.putExtra("body", next.optString("body", ""));
+            prefs(c).edit().putLong("due", best)
+                .putString("dueTitle", next.optString("title", "Prayer time"))
+                .putString("dueBody", next.optString("body", "")).apply();
             PendingIntent pi = PendingIntent.getBroadcast(c, 7, i, PendingIntent.FLAG_UPDATE_CURRENT | FLAG_IMMUTABLE);
             boolean exact = true;
             if (Build.VERSION.SDK_INT >= 31) {

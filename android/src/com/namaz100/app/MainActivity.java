@@ -57,6 +57,8 @@ public class MainActivity extends Activity {
         s.setDatabaseEnabled(true);
         s.setGeolocationEnabled(true);
         s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setMediaPlaybackRequiresUserGesture(true);
         s.setTextZoom(100);
 
@@ -87,6 +89,8 @@ public class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback cb) {
+                Uri o = Uri.parse(origin);
+                if (!HOST.equals(o.getHost())) { cb.invoke(origin, false, false); return; } // only our own page
                 if (hasLocation()) { cb.invoke(origin, true, false); return; }
                 geoOrigin = origin; geoCallback = cb;
                 requestPermissions(new String[]{"android.permission.ACCESS_COARSE_LOCATION"}, REQ_LOCATION);

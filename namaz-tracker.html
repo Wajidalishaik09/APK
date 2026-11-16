@@ -262,6 +262,7 @@ nav.tabs button.on{color:var(--brand)}
 .sharebtn{width:100%;min-height:50px;font-size:16px;margin-top:12px}
 #shareImg{width:100%;border-radius:14px;margin:10px 0;box-shadow:0 6px 20px rgba(0,0,0,.25)}
 .photo-btn{width:100%;min-height:50px;font-size:15px;margin-bottom:8px;background:linear-gradient(135deg,#b88a2e,#e0b65a);border:0;color:#2a1d04;font-weight:700}
+.pproof{display:block;font-size:11px;color:var(--gold);font-weight:600;margin-top:2px}
 .proofimg{width:100%;max-height:52vh;object-fit:contain;border-radius:14px;background:#000;margin:10px 0}
 .mission{position:relative;overflow:hidden;border:2px solid var(--gold);background:linear-gradient(160deg,var(--gold-soft),var(--card) 70%)}
 .mission .phase{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--gold);background:none;border:0;padding:0;margin:0}
@@ -1041,6 +1042,12 @@ body.locked .seg{display:none}
   <button class="btn" id="shareClose" style="width:100%;margin-top:8px">Close</button>
 </div></div>
 <input type="file" id="camIn" accept="image/*" capture="environment" hidden>
+<div class="modal" id="camModal" hidden role="dialog" aria-modal="true"><div class="box2" style="max-width:420px">
+  <b style="font-size:17px" id="camTitle">📸 Masjid photo</b>
+  <video id="camVideo" class="proofimg" autoplay playsinline muted></video>
+  <p class="note" style="margin:0 0 12px">Point the camera at the inside of the Masjid (the mihrab, the rows or the carpet). The photo is <b>not saved and not uploaded</b>. Only the time is kept.</p>
+  <div class="row"><button class="btn" id="camCancel">Cancel</button><button class="btn primary" id="camShot">📸 Take photo</button></div>
+</div></div>
 <div class="modal" id="proofModal" hidden role="dialog" aria-modal="true"><div class="box2" style="max-width:420px">
   <b style="font-size:17px">📸 Your Masjid photo</b>
   <img class="proofimg" id="proofImg" alt="Photo you just took">
@@ -1742,7 +1749,7 @@ function renderToday(){
     const v=d.p[p.id]; const s=d.s&&d.s[p.id];
     const sis=SIS();
     return `<div class="prayer${(v==='masjid'||(sis&&v==='ok'))?' done-mas':''}">
-      <div><div class="pname">${p.n}<span class="ar">${p.ar}</span></div><div class="pmeta">${p.fard} Fard · Sunnah: ${p.sunnah}</div></div>
+      <div><div class="pname">${p.n}<span class="ar">${p.ar}</span></div><div class="pmeta">${p.fard} Fard · Sunnah: ${p.sunnah}</div>${v==='masjid'&&d.pp&&d.pp[p.id]?`<span class="pproof">📸 Masjid photo ${esc(d.pp[p.id])}</span>`:''}</div>
       <div class="ptime${nextId===p.id?' next':''}">${pt?fmt(pt[p.id]):''}${nextId===p.id?'<div class="pmeta">next</div>':''}</div>
       <div class="seg" data-p="${p.id}">
         ${sis ? `<button class="ok mas${v==='ok'?' on':''}" data-v="ok">🌸 On time</button>`
@@ -2102,15 +2109,51 @@ function renderMission(){
   el.innerHTML=h;
 }
 /* 📸 Masjid proof photo: camera only, shown once, never stored */
-let proofURL=null;
+let proofURL=null, proofFor=null, camStream=null;   // proofFor = {p, date} when the photo is for a prayer
+const nowH = () => { const n=new Date(); return n.getHours()+n.getMinutes()/60; };
+// A Masjid prayer can only be recorded live, during that prayer's time.
+function masjidWindow(p, date){
+  const t=todayStr(), name=PRAYERS.find(x=>x.id===p).n;
+  if(date!==t){
+    const ptT=prayerTimes(t);
+    if(p==='isha' && date===addDays(t,-1) && (!ptT || nowH()<ptT.fajr)) return '';
+    return `🕌 Masjid needs a live photo, taken during the prayer time. For a past day, mark ✓ Home or ⏱ Late instead.`;
+  }
+  const pt=prayerTimes(date); if(!pt) return '';
+  const i=PRAYERS.findIndex(x=>x.id===p), start=pt[p]-20/60, nxt=PRAYERS[i+1], end=nxt?pt[nxt.id]:24;
+  if(nowH()<start) return `${name} has not started yet (${fmt(pt[p])}). Take the photo when you are in the Masjid for ${name}, in sha Allah 🕌`;
+  if(nowH()>end) return `${name} time is over. 🕌 Masjid can only be marked with a live photo during ${name} time. Mark ✓ Home or ⏱ Late, and try for the next prayer 🤍`;
+  return '';
+}
+function startMasjidProof(p, date){
+  const why=masjidWindow(p,date); if(why) return ask(why,'OK');
+  proofFor={p,date}; startCamera(PRAYERS.find(x=>x.id===p).n);
+}
+function stopCam(){ if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; } $('#camVideo').srcObject=null; $('#camModal').hidden=true; }
+async function startCamera(label){
+  $('#camTitle').textContent='📸 '+(label?label+' in the Masjid':'Masjid photo');
+  try{
+    if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) throw 0;
+    camStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false});
+    $('#camVideo').srcObject=camStream; $('#camModal').hidden=false;
+  }catch(e){ stopCam(); openCamera(); }   // no live camera: fall back to the phone's camera app
+}
+$('#camCancel').addEventListener('click',()=>{ stopCam(); if(proofFor){ proofFor=null; toast('Not marked. A Masjid prayer needs a live photo 📸'); } });
+$('#camShot').addEventListener('click',()=>{
+  const v=$('#camVideo'); if(!v.videoWidth) return toast('Camera is starting…');
+  const sc=Math.min(1,1280/v.videoWidth), c=document.createElement('canvas');
+  c.width=Math.round(v.videoWidth*sc); c.height=Math.round(v.videoHeight*sc);
+  c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+  const url=c.toDataURL('image/jpeg',0.8); stopCam(); showProof(url);
+});
 function openCamera(){
   if(window.AndroidBridge && AndroidBridge.takePhoto){ try{ AndroidBridge.takePhoto(); return; }catch(e){} }
   const i=$('#camIn'); i.value=''; i.click();
 }
 function showProof(url){ proofURL=url; $('#proofImg').src=url; $('#proofModal').hidden=false; }
 window.onNativePhoto = url => {
-  if(url==='nocamera') return toast('No camera app found on this phone');
-  if(!url) return toast('No photo taken');
+  if(url==='nocamera'){ proofFor=null; return toast('No camera app found on this phone'); }
+  if(!url){ if(proofFor){ proofFor=null; return toast('Not marked. A Masjid prayer needs a live photo 📸'); } return toast('No photo taken'); }
   showProof(url);
 };
 $('#camIn').addEventListener('change',e=>{
@@ -2119,10 +2162,19 @@ $('#camIn').addEventListener('change',e=>{
   if(Date.now()-f.lastModified > 10*60*1000) return toast('That is an old photo. Please take a new one now, inside the Masjid 📸');
   const r=new FileReader(); r.onload=()=>showProof(r.result); r.readAsDataURL(f);
 });
-$('#proofRetake').addEventListener('click',()=>{ $('#proofModal').hidden=true; $('#proofImg').src=''; proofURL=null; openCamera(); });
+$('#proofRetake').addEventListener('click',()=>{ $('#proofModal').hidden=true; $('#proofImg').src=''; proofURL=null; startCamera(proofFor?PRAYERS.find(x=>x.id===proofFor.p).n:''); });
 $('#proofOk').addEventListener('click',()=>{
-  const d=day(todayStr()); const n=new Date(); d.proof=fmt(n.getHours()+n.getMinutes()/60); save();
+  const time=fmt(nowH());
   $('#proofModal').hidden=true; $('#proofImg').src=''; proofURL=null;   // discard the photo
+  if(proofFor){
+    const {p,date}=proofFor; proofFor=null; const d=day(date);
+    d.p[p]='masjid'; d.pp=d.pp||{}; d.pp[p]=time; if(date===todayStr() && !d.proof) d.proof=time;
+    save(); renderToday();
+    const nb=document.querySelector(`.seg[data-p="${p}"] button[data-v="masjid"]`); if(nb) celebrateBtn(nb,'masjid',d);
+    if(allMasjid(d)) bigCelebrate('All 5 prayers in the Masjid today 🕌'); else toast('📸 '+PRAYERS.find(x=>x.id===p).n+' in the Masjid recorded at '+time+'. MashaAllah! 🕌');
+    return;
+  }
+  const d=day(todayStr()); d.proof=time; save();
   renderMission(); toast('📸 Masjid proof recorded at '+d.proof+'. MashaAllah!');
   const b=document.querySelector('[data-claim]'); if(b && !b.disabled) burst(b,['🕌','✨'],8);
 });
@@ -2600,13 +2652,14 @@ document.addEventListener('click',e=>{
     save(); renderToday(); }); return; }
   const btn=e.target.closest('.seg button');
   if(btn){ const p=btn.parentElement.dataset.p, v=btn.dataset.v, d=day();
-    if(v==='sunnah') d.s[p]=!d.s[p]; else d.p[p] = d.p[p]===v ? undefined : v;
+    if(v==='masjid' && d.p[p]!=='masjid'){ startMasjidProof(p, cur); return; }   // live photo first
+    if(v==='masjid' && d.pp) delete d.pp[p];
+    if(v==='sunnah') d.s[p]=!d.s[p]; else { d.p[p] = d.p[p]===v ? undefined : v; if(d.pp && d.p[p]!=='masjid') delete d.pp[p]; }
     if(d.p[p]===undefined) delete d.p[p];
     save(); renderToday();
     const nb=document.querySelector(`.seg[data-p="${p}"] button[data-v="${v}"]`);
     if(nb && (v==='sunnah' ? d.s[p] : d.p[p]===v)) celebrateBtn(nb, v, d);
     if(SIS() && onTime(d.p[p]) && allMasjid(d)) bigCelebrate('All 5 prayers on time today 🌸');
-    if(v==='masjid' && d.p[p]==='masjid'){ if(allMasjid(d)) bigCelebrate('All 5 prayers in the Masjid today 🕌'); else toast('Alhamdulillah — '+PRAYERS.find(x=>x.id===p).n+' in jama\'ah 🕌 Only if it is true — Allah is watching 🤍'); }
     if(v==='ok' && d.p[p]==='ok' && !SIS()){ toast('Prayed at home. Try to reach the Masjid for the next prayer, in sha Allah 🕌'); }
     if(v==='miss' && d.p[p]==='miss') toast('Make it up (qada) as soon as you can, and make tawbah. Don\'t give up.');
     return; }
